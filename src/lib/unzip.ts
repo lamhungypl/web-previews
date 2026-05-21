@@ -25,7 +25,9 @@ export async function unzipFile(file: File): Promise<UnpackedProject> {
   const files = new Map<string, Uint8Array>(Object.entries(stripped))
   const entrypoint = findEntrypoint(files)
   if (!entrypoint) {
-    throw new Error('No index.html found in the uploaded zip.')
+    throw new Error(
+      'No index.html found, and the zip contains more than one HTML file — could not pick an entrypoint.',
+    )
   }
   return { files, entrypoint }
 }
@@ -50,18 +52,35 @@ function stripCommonRoot(files: Record<string, Uint8Array>): Record<string, Uint
   return out
 }
 
-/** Locate an index.html: prefer root, otherwise the shallowest one. */
+/**
+ * Locate the HTML entrypoint:
+ *   1. `index.html` at the root.
+ *   2. Otherwise, the shallowest `*\/index.html`.
+ *   3. Escape hatch: if the zip contains exactly one .html/.htm file overall,
+ *      use it regardless of name. Picks up zips like `report.html` or
+ *      `MyDemo.htm` without forcing the user to rename.
+ */
 function findEntrypoint(files: Map<string, Uint8Array>): string | null {
   if (files.has('index.html')) return 'index.html'
-  let best: string | null = null
-  let bestDepth = Infinity
+
+  let shallowestIndex: string | null = null
+  let shallowestDepth = Infinity
+  const htmlFiles: string[] = []
+
   for (const path of files.keys()) {
-    if (!path.toLowerCase().endsWith('/index.html')) continue
-    const depth = path.split('/').length
-    if (depth < bestDepth) {
-      best = path
-      bestDepth = depth
+    const lower = path.toLowerCase()
+    if (!lower.endsWith('.html') && !lower.endsWith('.htm')) continue
+    htmlFiles.push(path)
+    if (lower.endsWith('/index.html')) {
+      const depth = path.split('/').length
+      if (depth < shallowestDepth) {
+        shallowestIndex = path
+        shallowestDepth = depth
+      }
     }
   }
-  return best
+
+  if (shallowestIndex) return shallowestIndex
+  if (htmlFiles.length === 1) return htmlFiles[0]
+  return null
 }
