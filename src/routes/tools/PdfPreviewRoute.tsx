@@ -2,6 +2,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
+  ExternalLink,
   FileText,
   ZoomIn,
   ZoomOut,
@@ -174,6 +175,11 @@ export function PdfPreviewRoute() {
             <ZoomIn />
           </Button>
           <span className="mx-2 h-5 w-px bg-border" />
+          <Button variant="ghost" size="icon" asChild title="Open in new tab">
+            <a href={pdf.url} target="_blank" rel="noreferrer noopener">
+              <ExternalLink />
+            </a>
+          </Button>
           <Button variant="ghost" size="icon" onClick={download} title="Download">
             <Download />
           </Button>
