@@ -1,6 +1,11 @@
 import { Download, FlipHorizontal, ImageIcon, RotateCw } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
-import Cropper, { type Area } from 'react-easy-crop'
+import { useRef, useState } from 'react'
+import ReactCrop, {
+  centerCrop,
+  type Crop,
+  makeAspectCrop,
+  type PixelCrop,
+} from 'react-image-crop'
 import { toast } from 'sonner'
 
 import { FilePicker } from '@/components/FilePicker'
@@ -8,10 +13,12 @@ import { Button } from '@/components/ui/button'
 import {
   cropImage,
   extensionFor,
-  type Flip,
   formatBytes,
   type OutputFormat,
+  transformImage,
 } from '@/lib/image'
+
+import 'react-image-crop/dist/ReactCrop.css'
 
 const ASPECTS: { label: string; value: number | undefined }[] = [
   { label: 'Free', value: undefined },
@@ -27,49 +34,102 @@ const FORMATS: OutputFormat[] = ['image/jpeg', 'image/png', 'image/webp']
 export function ImageCropRoute() {
   const [src, setSrc] = useState<string | null>(null)
   const [fileName, setFileName] = useState('image')
-  const [crop, setCrop] = useState({ x: 0, y: 0 })
-  const [zoom, setZoom] = useState(1)
-  const [rotation, setRotation] = useState(0)
+  const [crop, setCrop] = useState<Crop>()
+  const [completedCrop, setCompletedCrop] = useState<PixelCrop | null>(null)
   const [aspect, setAspect] = useState<number | undefined>(1)
-  const [flip, setFlip] = useState<Flip>({ horizontal: false, vertical: false })
-  const [pixelCrop, setPixelCrop] = useState<Area | null>(null)
   const [format, setFormat] = useState<OutputFormat>('image/jpeg')
   const [quality, setQuality] = useState(0.92)
   const [busy, setBusy] = useState(false)
-
-  useEffect(() => {
-    return () => {
-      if (src) URL.revokeObjectURL(src)
-    }
-  }, [src])
-
-  const onCropComplete = useCallback((_: Area, pixels: Area) => {
-    setPixelCrop(pixels)
-  }, [])
+  const imgRef = useRef<HTMLImageElement>(null)
 
   function handleFile(file: File) {
     if (src) URL.revokeObjectURL(src)
     setSrc(URL.createObjectURL(file))
     setFileName(file.name.replace(/\.[^.]+$/, '') || 'image')
-    setCrop({ x: 0, y: 0 })
-    setZoom(1)
-    setRotation(0)
+    setCrop(undefined)
+    setCompletedCrop(null)
+  }
+
+  function onImageLoad(e: React.SyntheticEvent<HTMLImageElement>) {
+    const { width, height } = e.currentTarget
+    // Initial 90%-of-image centered selection at the current aspect.
+    const initial = centerCrop(
+      makeAspectCrop({ unit: '%', width: 90 }, aspect ?? width / height, width, height),
+      width,
+      height,
+    )
+    setCrop(initial)
+  }
+
+  function setAspectAndRecenter(next: number | undefined) {
+    setAspect(next)
+    const img = imgRef.current
+    if (!img) return
+    const { width, height } = img
+    const newCrop = centerCrop(
+      makeAspectCrop({ unit: '%', width: 90 }, next ?? width / height, width, height),
+      width,
+      height,
+    )
+    setCrop(newCrop)
+  }
+
+  async function rotate90() {
+    if (!src) return
+    setBusy(true)
+    try {
+      const blob = await transformImage({ imageSrc: src, rotation: 90 })
+      URL.revokeObjectURL(src)
+      setSrc(URL.createObjectURL(blob))
+      setCrop(undefined)
+      setCompletedCrop(null)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Rotate failed.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function flip(axis: 'horizontal' | 'vertical') {
+    if (!src) return
+    setBusy(true)
+    try {
+      const blob = await transformImage({
+        flip: { horizontal: axis === 'horizontal', vertical: axis === 'vertical' },
+        imageSrc: src,
+      })
+      URL.revokeObjectURL(src)
+      setSrc(URL.createObjectURL(blob))
+      setCrop(undefined)
+      setCompletedCrop(null)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Flip failed.')
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function download() {
-    if (!src || !pixelCrop) return
+    if (!src || !completedCrop || !imgRef.current) return
     setBusy(true)
     try {
+      // react-image-crop returns pixels in the displayed image's space; scale
+      // to natural-image pixels before cropping on a canvas.
+      const img = imgRef.current
+      const scaleX = img.naturalWidth / img.width
+      const scaleY = img.naturalHeight / img.height
       const blob = await cropImage({
-        flip,
         format,
         imageSrc: src,
-        pixelCrop,
+        pixelCrop: {
+          height: completedCrop.height * scaleY,
+          width: completedCrop.width * scaleX,
+          x: completedCrop.x * scaleX,
+          y: completedCrop.y * scaleY,
+        },
         quality,
-        rotation,
       })
-      const ext = extensionFor(format)
-      triggerDownload(blob, `${fileName}-cropped.${ext}`)
+      triggerDownload(blob, `${fileName}-cropped.${extensionFor(format)}`)
       toast.success(`Exported ${formatBytes(blob.size)}`)
     } catch (err) {
       console.error(err)
@@ -81,7 +141,10 @@ export function ImageCropRoute() {
 
   if (!src) {
     return (
-      <ToolShell title="Image Cropper" hint="Crop, rotate, flip and re-encode.">
+      <ToolShell
+        title="Image Cropper"
+        hint="Drag the corners to crop. Aspect, rotation and flip below."
+      >
         <FilePicker
           accept={{ 'image/*': [] }}
           icon={ImageIcon}
@@ -96,19 +159,24 @@ export function ImageCropRoute() {
   return (
     <ToolShell title="Image Cropper">
       <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
-        <div className="relative h-[60vh] overflow-hidden rounded-lg border bg-muted">
-          <Cropper
-            image={src}
+        <div className="flex max-h-[70vh] items-center justify-center overflow-auto rounded-lg border bg-muted p-2">
+          <ReactCrop
             crop={crop}
-            zoom={zoom}
-            rotation={rotation}
+            onChange={(c) => setCrop(c)}
+            onComplete={(c) => setCompletedCrop(c)}
             aspect={aspect}
-            onCropChange={setCrop}
-            onZoomChange={setZoom}
-            onRotationChange={setRotation}
-            onCropComplete={onCropComplete}
-            transform={`translate(${crop.x}px, ${crop.y}px) rotate(${rotation}deg) scale(${zoom}) scaleX(${flip.horizontal ? -1 : 1}) scaleY(${flip.vertical ? -1 : 1})`}
-          />
+            ruleOfThirds
+            keepSelection
+            disabled={busy}
+          >
+            <img
+              ref={imgRef}
+              src={src}
+              alt=""
+              onLoad={onImageLoad}
+              className="max-h-[66vh] max-w-full select-none"
+            />
+          </ReactCrop>
         </div>
 
         <div className="flex flex-col gap-4">
@@ -119,7 +187,7 @@ export function ImageCropRoute() {
                   key={a.label}
                   size="sm"
                   variant={aspect === a.value ? 'default' : 'outline'}
-                  onClick={() => setAspect(a.value)}
+                  onClick={() => setAspectAndRecenter(a.value)}
                 >
                   {a.label}
                 </Button>
@@ -127,53 +195,32 @@ export function ImageCropRoute() {
             </div>
           </Field>
 
-          <Field label={`Zoom · ${zoom.toFixed(2)}×`}>
-            <input
-              type="range"
-              min={1}
-              max={4}
-              step={0.01}
-              value={zoom}
-              onChange={(e) => setZoom(Number(e.target.value))}
-              className="w-full"
-            />
-          </Field>
-
-          <Field label={`Rotation · ${rotation}°`}>
-            <div className="flex items-center gap-2">
-              <input
-                type="range"
-                min={-180}
-                max={180}
-                step={1}
-                value={rotation}
-                onChange={(e) => setRotation(Number(e.target.value))}
-                className="w-full"
-              />
-              <Button
-                size="icon"
-                variant="outline"
-                onClick={() => setRotation((r) => (r + 90) % 360)}
-                title="Rotate 90°"
-              >
-                <RotateCw />
-              </Button>
-            </div>
-          </Field>
-
-          <Field label="Flip">
+          <Field label="Rotate / Flip">
             <div className="flex gap-1">
               <Button
                 size="sm"
-                variant={flip.horizontal ? 'default' : 'outline'}
-                onClick={() => setFlip((f) => ({ ...f, horizontal: !f.horizontal }))}
+                variant="outline"
+                onClick={rotate90}
+                disabled={busy}
+                title="Rotate 90° clockwise"
+              >
+                <RotateCw /> 90°
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => flip('horizontal')}
+                disabled={busy}
+                title="Flip horizontally"
               >
                 <FlipHorizontal /> H
               </Button>
               <Button
                 size="sm"
-                variant={flip.vertical ? 'default' : 'outline'}
-                onClick={() => setFlip((f) => ({ ...f, vertical: !f.vertical }))}
+                variant="outline"
+                onClick={() => flip('vertical')}
+                disabled={busy}
+                title="Flip vertically"
               >
                 <FlipHorizontal className="rotate-90" /> V
               </Button>
@@ -208,8 +255,18 @@ export function ImageCropRoute() {
             </Field>
           ) : null}
 
+          {completedCrop ? (
+            <p className="text-xs text-muted-foreground">
+              Selection:{' '}
+              <span className="font-mono">
+                {Math.round(completedCrop.width)} × {Math.round(completedCrop.height)} px
+                (displayed)
+              </span>
+            </p>
+          ) : null}
+
           <div className="mt-auto flex flex-col gap-2">
-            <Button onClick={download} disabled={!pixelCrop || busy}>
+            <Button onClick={download} disabled={!completedCrop || busy}>
               <Download /> {busy ? 'Encoding…' : 'Download cropped'}
             </Button>
             <Button
@@ -217,7 +274,7 @@ export function ImageCropRoute() {
               onClick={() => {
                 URL.revokeObjectURL(src)
                 setSrc(null)
-                setPixelCrop(null)
+                setCompletedCrop(null)
               }}
             >
               Load another image
@@ -229,7 +286,7 @@ export function ImageCropRoute() {
   )
 }
 
-function Field({ label, children }: { children: React.ReactNode; label: string }) {
+function Field({ children, label }: { children: React.ReactNode; label: string }) {
   return (
     <label className="flex flex-col gap-1.5 text-sm">
       <span className="text-muted-foreground">{label}</span>

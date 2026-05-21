@@ -2,14 +2,14 @@
 // Each tool route imports only the loader it needs, and Vite splits prettier
 // into separate chunks (~50-150KB each) so the home page stays light.
 
-import type { Options } from 'prettier'
+import type { PrettierConfig } from '@/lib/prettier-config'
 
 export type Language = 'css' | 'js' | 'ts'
 
 export async function formatSource(
   source: string,
   language: Language,
-  extra: Partial<Options> = {},
+  config: Partial<PrettierConfig> = {},
 ): Promise<string> {
   const prettier = await import('prettier/standalone')
   const parser = parserFor(language)
@@ -22,7 +22,7 @@ export async function formatSource(
     singleQuote: true,
     tabWidth: 2,
     trailingComma: 'all',
-    ...extra,
+    ...config,
   })
 }
 

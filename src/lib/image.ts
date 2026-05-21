@@ -105,6 +105,45 @@ interface ConvertOptions {
   quality?: number
 }
 
+interface TransformOptions {
+  flip?: Flip
+  /** Re-encode as PNG by default so repeated transforms don't lose quality. */
+  format?: OutputFormat
+  imageSrc: string
+  quality?: number
+  /** Degrees clockwise; 90 / 180 / 270 supported (and 0 = identity). */
+  rotation?: number
+}
+
+/**
+ * Re-encode an image with rotation and/or flip applied.
+ * Used by the cropper for "Rotate 90°" / "Flip" buttons so the crop UI
+ * always sees an upright source.
+ */
+export async function transformImage({
+  flip = { horizontal: false, vertical: false },
+  format = 'image/png',
+  imageSrc,
+  quality = 1,
+  rotation = 0,
+}: TransformOptions): Promise<Blob> {
+  const image = await createImage(imageSrc)
+  const { width: outW, height: outH } = rotatedSize(image.width, image.height, rotation)
+  const canvas = document.createElement('canvas')
+  canvas.width = outW
+  canvas.height = outH
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Could not create 2D canvas context.')
+
+  ctx.translate(outW / 2, outH / 2)
+  ctx.rotate(radians(rotation))
+  ctx.scale(flip.horizontal ? -1 : 1, flip.vertical ? -1 : 1)
+  ctx.translate(-image.width / 2, -image.height / 2)
+  ctx.drawImage(image, 0, 0)
+
+  return await canvasToBlob(canvas, format, quality)
+}
+
 /** Re-encode an image into a different format / size. */
 export async function convertImage({
   format,

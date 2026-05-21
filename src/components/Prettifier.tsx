@@ -1,8 +1,14 @@
-import { Check, Copy, Download, Wand2 } from 'lucide-react'
+import { Check, Copy, Download, RotateCcw, Wand2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
+import {
+  defaultConfig,
+  loadConfig,
+  type PrettierConfig,
+  saveConfig,
+} from '@/lib/prettier-config'
 import { formatSource, type Language } from '@/lib/prettify'
 
 interface PrettifierProps {
@@ -27,10 +33,16 @@ export function Prettifier({
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [config, setConfig] = useState<PrettierConfig>(() => loadConfig(language))
 
-  // Auto-format on input changes, debounced — keeps the UX one-click but
-  // doesn't fight the user as they type. All setState calls live inside the
-  // timer callback so we don't trigger react-hooks/set-state-in-effect.
+  // Persist whenever config changes for this language.
+  useEffect(() => {
+    saveConfig(language, config)
+  }, [language, config])
+
+  // Auto-format on input/config/language changes, debounced. All setState
+  // calls live inside the timer callback so we don't trigger
+  // react-hooks/set-state-in-effect.
   useEffect(() => {
     let cancelled = false
     const empty = !input.trim()
@@ -44,7 +56,7 @@ export function Prettifier({
         }
         setBusy(true)
         try {
-          const formatted = await formatSource(input, language)
+          const formatted = await formatSource(input, language, config)
           if (cancelled) return
           setOutput(formatted)
           setError(null)
@@ -61,12 +73,12 @@ export function Prettifier({
       cancelled = true
       clearTimeout(t)
     }
-  }, [input, language])
+  }, [input, language, config])
 
   async function manualFormat() {
     setBusy(true)
     try {
-      const formatted = await formatSource(input, language)
+      const formatted = await formatSource(input, language, config)
       setOutput(formatted)
       setError(null)
     } catch (err) {
@@ -106,7 +118,7 @@ export function Prettifier({
   }
 
   return (
-    <div className="mx-auto flex h-full max-w-6xl flex-col gap-4 px-4 py-6">
+    <div className="mx-auto flex h-full max-w-7xl flex-col gap-4 px-4 py-6">
       <div className="flex flex-wrap items-center gap-2">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
@@ -124,7 +136,7 @@ export function Prettifier({
         </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-2">
+      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[1fr_1fr_260px]">
         <Pane title="Input">
           <textarea
             value={input}
@@ -173,8 +185,155 @@ export function Prettifier({
             />
           )}
         </Pane>
+        <ConfigPanel
+          config={config}
+          language={language}
+          onChange={(patch) => setConfig((c) => ({ ...c, ...patch }))}
+          onReset={() => setConfig(defaultConfig)}
+        />
       </div>
     </div>
+  )
+}
+
+function ConfigPanel({
+  config,
+  language,
+  onChange,
+  onReset,
+}: {
+  config: PrettierConfig
+  language: Language
+  onChange: (patch: Partial<PrettierConfig>) => void
+  onReset: () => void
+}) {
+  const isJs = language !== 'css'
+  return (
+    <aside className="flex flex-col gap-4 rounded-md border bg-card p-4">
+      <div className="flex items-center">
+        <span className="text-sm font-semibold">Settings</span>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="ml-auto h-7 px-2 text-xs"
+          onClick={onReset}
+          title="Reset to defaults"
+        >
+          <RotateCcw /> Reset
+        </Button>
+      </div>
+
+      <Field label={`Print width · ${config.printWidth}`}>
+        <input
+          type="range"
+          min={40}
+          max={200}
+          step={1}
+          value={config.printWidth}
+          onChange={(e) => onChange({ printWidth: Number(e.target.value) })}
+          className="w-full"
+        />
+      </Field>
+
+      <Field label={`Tab width · ${config.tabWidth}`}>
+        <input
+          type="range"
+          min={1}
+          max={8}
+          step={1}
+          value={config.tabWidth}
+          onChange={(e) => onChange({ tabWidth: Number(e.target.value) })}
+          className="w-full"
+        />
+      </Field>
+
+      <Toggle
+        checked={config.useTabs}
+        label="Use tabs"
+        onChange={(v) => onChange({ useTabs: v })}
+      />
+
+      <Toggle
+        checked={config.singleQuote}
+        label="Single quotes"
+        onChange={(v) => onChange({ singleQuote: v })}
+      />
+
+      {isJs ? (
+        <>
+          <Toggle
+            checked={config.semi}
+            label="Semicolons"
+            onChange={(v) => onChange({ semi: v })}
+          />
+          <Toggle
+            checked={config.bracketSpacing}
+            label="Bracket spacing"
+            onChange={(v) => onChange({ bracketSpacing: v })}
+          />
+          <Field label="Trailing comma">
+            <select
+              value={config.trailingComma}
+              onChange={(e) =>
+                onChange({
+                  trailingComma: e.target.value as PrettierConfig['trailingComma'],
+                })
+              }
+              className="h-9 w-full rounded-md border bg-background px-2 text-sm"
+            >
+              <option value="none">none</option>
+              <option value="es5">es5</option>
+              <option value="all">all</option>
+            </select>
+          </Field>
+          <Field label="Arrow parens">
+            <select
+              value={config.arrowParens}
+              onChange={(e) =>
+                onChange({
+                  arrowParens: e.target.value as PrettierConfig['arrowParens'],
+                })
+              }
+              className="h-9 w-full rounded-md border bg-background px-2 text-sm"
+            >
+              <option value="always">always</option>
+              <option value="avoid">avoid</option>
+            </select>
+          </Field>
+        </>
+      ) : null}
+    </aside>
+  )
+}
+
+function Field({ children, label }: { children: React.ReactNode; label: string }) {
+  return (
+    <label className="flex flex-col gap-1.5 text-sm">
+      <span className="text-muted-foreground">{label}</span>
+      {children}
+    </label>
+  )
+}
+
+function Toggle({
+  checked,
+  label,
+  onChange,
+}: {
+  checked: boolean
+  label: string
+  onChange: (v: boolean) => void
+}) {
+  return (
+    <label className="flex cursor-pointer items-center gap-2 text-sm">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="size-4 accent-primary"
+      />
+      <span>{label}</span>
+    </label>
   )
 }
 
