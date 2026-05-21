@@ -3,6 +3,10 @@ import { createRootRoute, createRoute, createRouter } from '@tanstack/react-rout
 import { IndexRoute } from '@/routes/IndexRoute'
 import { PreviewRoute } from '@/routes/PreviewRoute'
 import { RootLayout } from '@/routes/RootLayout'
+import { CssPrettifyRoute } from '@/routes/tools/CssPrettifyRoute'
+import { ImageConvertRoute } from '@/routes/tools/ImageConvertRoute'
+import { ImageCropRoute } from '@/routes/tools/ImageCropRoute'
+import { JsPrettifyRoute } from '@/routes/tools/JsPrettifyRoute'
 
 const rootRoute = createRootRoute({ component: RootLayout })
 
@@ -18,7 +22,38 @@ const previewRoute = createRoute({
   component: PreviewRoute,
 })
 
-const routeTree = rootRoute.addChildren([indexRoute, previewRoute])
+const imageCropRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/tools/image-crop',
+  component: ImageCropRoute,
+})
+
+const imageConvertRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/tools/image-convert',
+  component: ImageConvertRoute,
+})
+
+const cssPrettifyRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/tools/css-prettify',
+  component: CssPrettifyRoute,
+})
+
+const jsPrettifyRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/tools/js-prettify',
+  component: JsPrettifyRoute,
+})
+
+const routeTree = rootRoute.addChildren([
+  indexRoute,
+  previewRoute,
+  imageCropRoute,
+  imageConvertRoute,
+  cssPrettifyRoute,
+  jsPrettifyRoute,
+])
 
 export const router = createRouter({
   routeTree,
