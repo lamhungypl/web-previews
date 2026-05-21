@@ -3,7 +3,7 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [master]
-  workflow_dispatch: {}
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -14,21 +14,67 @@ concurrency:
   group: pages
   cancel-in-progress: true
 
+env:
+  NODE_OPTIONS: --max-old-space-size=4096
+
 jobs:
-  build:
+  # ── Stage 1: gatekeeper — fail fast on style / types ────────────────────────
+  checks:
+    name: Lint, format & typecheck
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
-      # pnpm version is read from `packageManager` in package.json — keep this
-      # the single source of truth (otherwise action-setup errors with
-      # ERR_PNPM_BAD_PM_VERSION).
+      - name: Set Node version from .nvmrc
+        run: echo "NODE_VERSION=$(cat .nvmrc)" >> $GITHUB_ENV
+
+      # pnpm version is read from `packageManager` in package.json.
       - uses: pnpm/action-setup@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version-file: .nvmrc
+          node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
+
+      - name: Cache node_modules
+        id: node-modules-cache
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: pnpm-${{ hashFiles('pnpm-lock.yaml') }}-${{ env.NODE_VERSION }}
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm run lint
+      - run: pnpm run format:check
+      - run: pnpm run typecheck
+
+  # ── Stage 2: build the Pages artifact ───────────────────────────────────────
+  build:
+    name: Build
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set Node version from .nvmrc
+        run: echo "NODE_VERSION=$(cat .nvmrc)" >> $GITHUB_ENV
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Cache node_modules
+        id: node-modules-cache
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: pnpm-${{ hashFiles('pnpm-lock.yaml') }}-${{ env.NODE_VERSION }}
 
       - run: pnpm install --frozen-lockfile
 
@@ -40,7 +86,9 @@ jobs:
         with:
           path: dist
 
+  # ── Stage 3: publish to GitHub Pages ────────────────────────────────────────
   deploy:
+    name: Deploy
     needs: build
     runs-on: ubuntu-latest
     environment:
