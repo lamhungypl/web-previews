@@ -1,5 +1,13 @@
 import { Link, useRouterState } from '@tanstack/react-router'
-import { Code2, Crop, FileImage, Globe, type LucideIcon, Paintbrush } from 'lucide-react'
+import {
+  Code2,
+  Crop,
+  FileImage,
+  FileText,
+  Globe,
+  type LucideIcon,
+  Paintbrush,
+} from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 
@@ -30,6 +38,12 @@ export const TOOLS: ToolEntry[] = [
     icon: FileImage,
     title: 'Image Converter',
     to: '/tools/image-convert',
+  },
+  {
+    description: 'Render PDFs page by page, fully local',
+    icon: FileText,
+    title: 'PDF Preview',
+    to: '/tools/pdf-preview',
   },
   {
     description: 'Format and indent CSS',
