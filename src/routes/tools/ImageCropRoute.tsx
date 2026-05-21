@@ -1,4 +1,12 @@
-import { Download, FlipHorizontal, ImageIcon, RotateCw } from 'lucide-react'
+import {
+  Download,
+  FlipHorizontal,
+  ImageIcon,
+  Maximize2,
+  RotateCw,
+  ZoomIn,
+  ZoomOut,
+} from 'lucide-react'
 import { useRef, useState } from 'react'
 import ReactCrop, {
   centerCrop,
@@ -40,6 +48,12 @@ export function ImageCropRoute() {
   const [format, setFormat] = useState<OutputFormat>('image/jpeg')
   const [quality, setQuality] = useState(0.92)
   const [busy, setBusy] = useState(false)
+  /** 'fit' = scale-to-viewport (default). Number = absolute zoom vs. natural size. */
+  const [displayZoom, setDisplayZoom] = useState<'fit' | number>('fit')
+  const [imgNatural, setImgNatural] = useState<{
+    height: number
+    width: number
+  } | null>(null)
   const imgRef = useRef<HTMLImageElement>(null)
 
   function handleFile(file: File) {
@@ -51,7 +65,9 @@ export function ImageCropRoute() {
   }
 
   function onImageLoad(e: React.SyntheticEvent<HTMLImageElement>) {
-    const { width, height } = e.currentTarget
+    const img = e.currentTarget
+    const { width, height, naturalWidth, naturalHeight } = img
+    setImgNatural({ height: naturalHeight, width: naturalWidth })
     // Initial 90%-of-image centered selection at the current aspect.
     const initial = centerCrop(
       makeAspectCrop({ unit: '%', width: 90 }, aspect ?? width / height, width, height),
@@ -59,6 +75,20 @@ export function ImageCropRoute() {
       height,
     )
     setCrop(initial)
+  }
+
+  function zoomOut() {
+    setDisplayZoom((z) => {
+      if (z === 'fit') return 0.75
+      return Math.max(0.25, +(z - 0.25).toFixed(2))
+    })
+  }
+
+  function zoomIn() {
+    setDisplayZoom((z) => {
+      if (z === 'fit') return 1.25
+      return Math.min(4, +(z + 0.25).toFixed(2))
+    })
   }
 
   function setAspectAndRecenter(next: number | undefined) {
@@ -156,10 +186,24 @@ export function ImageCropRoute() {
     )
   }
 
+  const isFit = displayZoom === 'fit'
+  // react-image-crop's inner wrapper uses `max-height: inherit`, so we must set
+  // the cap on the ReactCrop wrapper (not the img) for fit-mode to work.
+  const cropWrapperStyle = isFit ? { maxHeight: '60vh' } : undefined
+  const imgStyle =
+    !isFit && imgNatural
+      ? {
+          height: imgNatural.height * displayZoom,
+          maxHeight: 'none',
+          maxWidth: 'none',
+          width: imgNatural.width * displayZoom,
+        }
+      : undefined
+
   return (
     <ToolShell title="Image Cropper">
       <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
-        <div className="flex max-h-[70vh] items-center justify-center overflow-auto rounded-lg border bg-muted p-2">
+        <div className="flex max-h-[64vh] items-center justify-center overflow-auto rounded-lg border bg-muted p-2">
           <ReactCrop
             crop={crop}
             onChange={(c) => setCrop(c)}
@@ -168,13 +212,15 @@ export function ImageCropRoute() {
             ruleOfThirds
             keepSelection
             disabled={busy}
+            style={cropWrapperStyle}
           >
             <img
               ref={imgRef}
               src={src}
               alt=""
               onLoad={onImageLoad}
-              className="max-h-[66vh] max-w-full select-none"
+              style={imgStyle}
+              className="block select-none"
             />
           </ReactCrop>
         </div>
@@ -223,6 +269,37 @@ export function ImageCropRoute() {
                 title="Flip vertically"
               >
                 <FlipHorizontal className="rotate-90" /> V
+              </Button>
+            </div>
+          </Field>
+
+          <Field label={`View · ${isFit ? 'Fit' : `${Math.round(displayZoom * 100)}%`}`}>
+            <div className="flex gap-1">
+              <Button
+                size="sm"
+                variant={isFit ? 'default' : 'outline'}
+                onClick={() => setDisplayZoom('fit')}
+                title="Fit image in view"
+              >
+                <Maximize2 /> Fit
+              </Button>
+              <Button
+                size="icon"
+                variant="outline"
+                onClick={zoomOut}
+                disabled={!isFit && displayZoom <= 0.25}
+                title="Zoom out"
+              >
+                <ZoomOut />
+              </Button>
+              <Button
+                size="icon"
+                variant="outline"
+                onClick={zoomIn}
+                disabled={!isFit && displayZoom >= 4}
+                title="Zoom in"
+              >
+                <ZoomIn />
               </Button>
             </div>
           </Field>
