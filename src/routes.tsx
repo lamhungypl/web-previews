@@ -7,6 +7,7 @@ import { CssPrettifyRoute } from '@/routes/tools/CssPrettifyRoute'
 import { ImageConvertRoute } from '@/routes/tools/ImageConvertRoute'
 import { ImageCropRoute } from '@/routes/tools/ImageCropRoute'
 import { JsPrettifyRoute } from '@/routes/tools/JsPrettifyRoute'
+import { MdPreviewRoute } from '@/routes/tools/MdPreviewRoute'
 import { PdfPreviewRoute } from '@/routes/tools/PdfPreviewRoute'
 
 const rootRoute = createRootRoute({ component: RootLayout })
@@ -27,6 +28,12 @@ const imageCropRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/tools/image-crop',
   component: ImageCropRoute,
+})
+
+const mdPreviewRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/tools/md-preview',
+  component: MdPreviewRoute,
 })
 
 const pdfPreviewRoute = createRoute({
@@ -58,6 +65,7 @@ const routeTree = rootRoute.addChildren([
   previewRoute,
   imageCropRoute,
   imageConvertRoute,
+  mdPreviewRoute,
   pdfPreviewRoute,
   cssPrettifyRoute,
   jsPrettifyRoute,

@@ -39,6 +39,13 @@ export async function packSingleHtml(file: File): Promise<UnpackedProject> {
   return { files, entrypoint: 'index.html' }
 }
 
+/** Build an UnpackedProject from raw HTML source (e.g. pasted from the clipboard). */
+export function packHtmlSource(source: string): UnpackedProject {
+  const bytes = new TextEncoder().encode(source)
+  const files = new Map<string, Uint8Array>([['index.html', bytes]])
+  return { files, entrypoint: 'index.html' }
+}
+
 /** If every entry shares a common top-level folder (e.g. `project/...`), strip it. */
 function stripCommonRoot(files: Record<string, Uint8Array>): Record<string, Uint8Array> {
   const keys = Object.keys(files)

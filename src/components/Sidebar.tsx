@@ -1,5 +1,6 @@
 import { Link, useRouterState } from '@tanstack/react-router'
 import {
+  BookOpenText,
   Code2,
   Crop,
   FileImage,
@@ -26,6 +27,12 @@ export const TOOLS: ToolEntry[] = [
     matchPrefix: '/view',
     title: 'HTML Preview',
     to: '/',
+  },
+  {
+    description: 'Render .md files with GitHub-like styling',
+    icon: BookOpenText,
+    title: 'Markdown Preview',
+    to: '/tools/md-preview',
   },
   {
     description: 'Crop, rotate, resize and re-encode',
