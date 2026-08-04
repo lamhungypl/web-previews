@@ -6,6 +6,12 @@
 import { useSyncExternalStore } from 'react'
 
 interface ProjectEntry {
+  /**
+   * Folder the project was read from, when it came off the local disk. Keeping
+   * the handle is what lets Reload pick up edits instead of just re-rendering
+   * the snapshot we already have.
+   */
+  dir: FileSystemDirectoryHandle | null
   entrypoint: string
   /** Display label (original filename) — purely cosmetic. */
   label: string

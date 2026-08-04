@@ -1,30 +1,88 @@
-import { Marked, type Tokens } from 'marked'
+import { Marked, type Token, type Tokens } from 'marked'
+
+export interface MarkdownHeading {
+  /** 1–6, as in h1–h6. */
+  depth: number
+  id: string
+  /** Inline markup stripped, so it can be dropped into the outline as text. */
+  text: string
+}
+
+export interface RenderedMarkdown {
+  headings: MarkdownHeading[]
+  html: string
+}
+
+export interface RenderMarkdownOptions {
+  /**
+   * Turn a relative link into something the iframe can load — used to pull
+   * sibling images off disk as blob URLs. Return null to leave the link alone.
+   */
+  resolveAsset?: (href: string) => Promise<null | string>
+  title: string
+}
 
 /**
  * Render a Markdown string into a complete standalone HTML document with
- * GitHub-flavored styling. The result is shown in a sandboxed iframe (and can
- * be opened in a new tab), mirroring how the HTML preview serves documents —
- * so embedded HTML is left as-is, same trust model as previewing raw .html.
+ * GitHub-flavored styling, plus the heading outline for the table of contents.
+ *
+ * The result is shown in a sandboxed iframe (and can be opened in a new tab),
+ * mirroring how the HTML preview serves documents — so embedded HTML is left
+ * as-is, same trust model as previewing raw .html. The iframe gets no
+ * `allow-scripts`, so nothing in the document executes; that is what makes it
+ * safe for the host page to reach into `contentDocument` for scroll-spy.
  *
  * ```mermaid``` code blocks are rendered to inline SVG here in the host page
  * (mermaid is lazy-loaded), so the iframe document needs no scripts.
  */
 export async function renderMarkdownDocument(
   markdown: string,
-  title: string,
-): Promise<string> {
-  // Collect mermaid blocks during parse and splice rendered SVGs in after —
-  // marked's renderer hooks are synchronous, mermaid rendering is not.
+  { resolveAsset, title }: RenderMarkdownOptions,
+): Promise<RenderedMarkdown> {
+  // Async work can't happen inside marked's synchronous renderer hooks, so
+  // mermaid diagrams and on-disk images are collected during the parse and
+  // spliced in afterwards. The nonce keeps placeholders from colliding with
+  // text that happens to look like one.
+  const nonce = crypto.randomUUID().slice(0, 8)
   const mermaidBlocks: string[] = []
+  const assetHrefs: string[] = []
+  const headings: MarkdownHeading[] = []
+  const slugger = createSlugger()
+
   const md = new Marked({ gfm: true })
   md.use({
     renderer: {
       code(token: Tokens.Code): false | string {
         if (token.lang?.trim().split(/\s/)[0] === 'mermaid') {
           mermaidBlocks.push(token.text)
-          return `<!--mermaid-${mermaidBlocks.length - 1}-->`
+          return `<!--mermaid-${nonce}-${mermaidBlocks.length - 1}-->`
         }
         return false
+      },
+
+      heading(this: { parser: { parseInline: (t: Token[]) => string } }, token) {
+        const text = inlineText(token.tokens)
+        const id = slugger(text)
+        headings.push({ depth: token.depth, id, text })
+        const inner = this.parser.parseInline(token.tokens)
+        return `<h${token.depth} id="${escapeAttr(id)}">${inner}</h${token.depth}>\n`
+      },
+
+      image(token: Tokens.Image): false | string {
+        if (!resolveAsset || !isRelativeHref(token.href)) return false
+        assetHrefs.push(token.href)
+        const alt = escapeAttr(token.text ?? '')
+        const titleAttr = token.title ? ` title="${escapeAttr(token.title)}"` : ''
+        return `<img src="__asset-${nonce}-${assetHrefs.length - 1}__" alt="${alt}"${titleAttr} />`
+      },
+
+      link(this: { parser: { parseInline: (t: Token[]) => string } }, token) {
+        // Relative links to other Markdown files stay in the viewer: the host
+        // page intercepts the click and loads the sibling file from disk.
+        if (!isRelativeHref(token.href) || !isMarkdownPath(token.href)) return false
+        const inner = this.parser.parseInline(token.tokens)
+        const titleAttr = token.title ? ` title="${escapeAttr(token.title)}"` : ''
+        return `<a href="${escapeAttr(token.href)}" data-local-md="${escapeAttr(token.href)}"${titleAttr}>${inner}</a>`
       },
     },
   })
@@ -33,10 +91,28 @@ export async function renderMarkdownDocument(
 
   if (mermaidBlocks.length > 0) {
     const svgs = await renderMermaidBlocks(mermaidBlocks)
-    body = body.replace(/<!--mermaid-(\d+)-->/g, (_, i: string) => svgs[Number(i)])
+    body = body.replace(
+      new RegExp(`<!--mermaid-${nonce}-(\\d+)-->`, 'g'),
+      (_, i: string) => svgs[Number(i)],
+    )
   }
 
-  return `<!doctype html>
+  if (assetHrefs.length > 0 && resolveAsset) {
+    const urls = await Promise.all(
+      assetHrefs.map(async (href) => {
+        try {
+          return await resolveAsset(href)
+        } catch {
+          return null
+        }
+      }),
+    )
+    body = body.replace(new RegExp(`__asset-${nonce}-(\\d+)__`, 'g'), (_, i: string) =>
+      escapeAttr(urls[Number(i)] ?? assetHrefs[Number(i)]),
+    )
+  }
+
+  const html = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -50,6 +126,51 @@ ${body}
 </article>
 </body>
 </html>`
+
+  return { headings, html }
+}
+
+/** A link is ours to resolve if it has no scheme, no host and no fragment-only target. */
+export function isRelativeHref(href: string): boolean {
+  if (!href) return false
+  return !/^([a-z][a-z\d+\-.]*:|\/\/|#|\/)/i.test(href)
+}
+
+export function isMarkdownPath(path: string): boolean {
+  return /\.(md|markdown|mdown|mkd)(\?|$)/i.test(path)
+}
+
+/** GitHub-style heading slugs, deduped with a numeric suffix. */
+function createSlugger(): (text: string) => string {
+  const seen = new Map<string, number>()
+  return (text) => {
+    const base =
+      text
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}\s-]/gu, '')
+        .trim()
+        .replace(/\s+/g, '-') || 'section'
+    const count = seen.get(base) ?? 0
+    seen.set(base, count + 1)
+    return count === 0 ? base : `${base}-${count}`
+  }
+}
+
+/** Flatten inline tokens to plain text for the outline label. */
+function inlineText(tokens: Token[] | undefined): string {
+  if (!tokens) return ''
+  return tokens
+    .map((token) => {
+      if ('tokens' in token && Array.isArray(token.tokens) && token.type !== 'image') {
+        return inlineText(token.tokens as Token[])
+      }
+      if (token.type === 'image') return (token as Tokens.Image).text ?? ''
+      if ('text' in token && typeof token.text === 'string') return token.text
+      return 'raw' in token && typeof token.raw === 'string' ? token.raw : ''
+    })
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 /** Render mermaid sources to SVG strings; a failed block becomes an error box. */
@@ -87,10 +208,15 @@ function escapeHtml(s: string): string {
     .replaceAll('"', '&quot;')
 }
 
+function escapeAttr(s: string): string {
+  return escapeHtml(s).replaceAll("'", '&#39;')
+}
+
 /** Compact GitHub-like markdown styling, light theme. */
 const MARKDOWN_CSS = `
 :root { color-scheme: light; }
 * { box-sizing: border-box; }
+html { scroll-padding-top: 16px; }
 body {
   margin: 0;
   background: #ffffff;
@@ -112,6 +238,7 @@ h1, h2, h3, h4, h5, h6 {
   margin-bottom: 16px;
   font-weight: 600;
   line-height: 1.25;
+  scroll-margin-top: 16px;
 }
 h1 { font-size: 2em; padding-bottom: 0.3em; border-bottom: 1px solid #d1d9e0; }
 h2 { font-size: 1.5em; padding-bottom: 0.3em; border-bottom: 1px solid #d1d9e0; }
