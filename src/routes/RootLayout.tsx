@@ -5,9 +5,12 @@ import { useEffect, useState } from 'react'
 import { Sidebar } from '@/components/Sidebar'
 import { Button } from '@/components/ui/button'
 import { Toaster } from '@/components/ui/sonner'
+import { SIDEBAR_WIDTH, useSidebarMode } from '@/hooks/useSidebarMode'
+import { cn } from '@/lib/utils'
 
 export function RootLayout() {
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const { cycle, mode, next } = useSidebarMode()
 
   // Lock body scroll while drawer is open.
   useEffect(() => {
@@ -47,8 +50,13 @@ export function RootLayout() {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <aside className="hidden w-64 shrink-0 border-r md:block">
-          <Sidebar />
+        <aside
+          className={cn(
+            'hidden shrink-0 border-r transition-[width] duration-200 md:block',
+            SIDEBAR_WIDTH[mode],
+          )}
+        >
+          <Sidebar cycleMode={cycle} mode={mode} nextMode={next} />
         </aside>
 
         <main className="min-w-0 flex-1 overflow-auto">
