@@ -4,8 +4,7 @@ import { IndexRoute } from '@/routes/IndexRoute'
 import { PreviewRoute } from '@/routes/PreviewRoute'
 import { RootLayout } from '@/routes/RootLayout'
 import { CssPrettifyRoute } from '@/routes/tools/CssPrettifyRoute'
-import { ImageConvertRoute } from '@/routes/tools/ImageConvertRoute'
-import { ImageCropRoute } from '@/routes/tools/ImageCropRoute'
+import { ImageStudioRoute } from '@/routes/tools/ImageStudioRoute'
 import { JsPrettifyRoute } from '@/routes/tools/JsPrettifyRoute'
 import { MdPreviewRoute } from '@/routes/tools/MdPreviewRoute'
 import { PdfPreviewRoute } from '@/routes/tools/PdfPreviewRoute'
@@ -24,10 +23,12 @@ const previewRoute = createRoute({
   component: PreviewRoute,
 })
 
-const imageCropRoute = createRoute({
+// Path kept from when this was crop-only; it now also covers re-encoding, which
+// the standalone Image Converter tool used to do.
+const imageStudioRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/tools/image-crop',
-  component: ImageCropRoute,
+  component: ImageStudioRoute,
 })
 
 const mdPreviewRoute = createRoute({
@@ -40,12 +41,6 @@ const pdfPreviewRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/tools/pdf-preview',
   component: PdfPreviewRoute,
-})
-
-const imageConvertRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/tools/image-convert',
-  component: ImageConvertRoute,
 })
 
 const cssPrettifyRoute = createRoute({
@@ -63,8 +58,7 @@ const jsPrettifyRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   indexRoute,
   previewRoute,
-  imageCropRoute,
-  imageConvertRoute,
+  imageStudioRoute,
   mdPreviewRoute,
   pdfPreviewRoute,
   cssPrettifyRoute,

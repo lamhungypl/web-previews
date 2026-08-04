@@ -1,8 +1,8 @@
 // Canvas-based image transforms. Cropping logic adapted from
 // kot-asean-fe/src/utils/image.ts (which was itself adapted from the
 // react-image-crop README example), extended to support arbitrary
-// output formats and a quality knob — so the same util powers both the
-// cropper and the converter tools.
+// output formats, resizing and a quality knob — one util covers both the
+// crop and the re-encode halves of the Image Studio tool.
 
 export type OutputFormat = 'image/jpeg' | 'image/png' | 'image/webp'
 
@@ -40,69 +40,109 @@ export function rotatedSize(width: number, height: number, rotation: number) {
   }
 }
 
-interface CropOptions {
+/**
+ * Output pixel size for a source region once `maxEdge` is applied. Exported so
+ * the UI can show the export dimensions without actually encoding.
+ */
+export function computeOutputSize(
+  source: { height: number; width: number },
+  maxEdge?: number,
+): { height: number; width: number } {
+  const width = Math.max(1, Math.round(source.width))
+  const height = Math.max(1, Math.round(source.height))
+  const longest = Math.max(width, height)
+  if (!maxEdge || longest <= maxEdge) return { height, width }
+  const scale = maxEdge / longest
+  return {
+    height: Math.max(1, Math.round(height * scale)),
+    width: Math.max(1, Math.round(width * scale)),
+  }
+}
+
+interface ExportOptions {
   flip?: Flip
   format?: OutputFormat
   imageSrc: string
-  pixelCrop: PixelArea
+  /** Cap on the longest output edge; preserves aspect ratio. */
+  maxEdge?: number
+  /** Region of the source in natural pixels. Omit to export the whole image. */
+  pixelCrop?: PixelArea
   /** 0..1 for lossy formats; ignored for PNG. */
   quality?: number
   rotation?: number
 }
 
-/** Crop + (optionally) rotate/flip an image, returning a Blob in the requested format. */
-export async function cropImage({
+/**
+ * Crop (optionally), rotate/flip, resize and re-encode in one pass, returning a
+ * Blob in the requested format.
+ */
+export async function exportImage({
   flip = { horizontal: false, vertical: false },
   format = 'image/jpeg',
   imageSrc,
+  maxEdge,
   pixelCrop,
   quality = 0.92,
   rotation = 0,
-}: CropOptions): Promise<Blob> {
+}: ExportOptions): Promise<Blob> {
   const image = await createImage(imageSrc)
-  const rotRad = radians(rotation)
 
-  const { width: boxW, height: boxH } = rotatedSize(image.width, image.height, rotation)
+  // Rotation/flip has to be baked into an intermediate canvas before a region
+  // can be addressed in the rotated coordinate space.
+  let source: CanvasImageSource = image
+  let sourceWidth = image.naturalWidth
+  let sourceHeight = image.naturalHeight
+  if (rotation !== 0 || flip.horizontal || flip.vertical) {
+    const box = rotatedSize(sourceWidth, sourceHeight, rotation)
+    const stage = document.createElement('canvas')
+    stage.width = Math.max(1, Math.round(box.width))
+    stage.height = Math.max(1, Math.round(box.height))
+    const stageCtx = stage.getContext('2d')
+    if (!stageCtx) throw new Error('Could not create 2D canvas context.')
+    stageCtx.translate(stage.width / 2, stage.height / 2)
+    stageCtx.rotate(radians(rotation))
+    stageCtx.scale(flip.horizontal ? -1 : 1, flip.vertical ? -1 : 1)
+    stageCtx.translate(-sourceWidth / 2, -sourceHeight / 2)
+    stageCtx.drawImage(image, 0, 0)
+    source = stage
+    sourceWidth = stage.width
+    sourceHeight = stage.height
+  }
 
-  const stage = document.createElement('canvas')
-  stage.width = boxW
-  stage.height = boxH
-  const stageCtx = stage.getContext('2d')
-  if (!stageCtx) throw new Error('Could not create 2D canvas context.')
+  const region: PixelArea = pixelCrop
+    ? {
+        height: Math.max(1, Math.round(pixelCrop.height)),
+        width: Math.max(1, Math.round(pixelCrop.width)),
+        x: Math.round(pixelCrop.x),
+        y: Math.round(pixelCrop.y),
+      }
+    : { height: sourceHeight, width: sourceWidth, x: 0, y: 0 }
 
-  stageCtx.translate(boxW / 2, boxH / 2)
-  stageCtx.rotate(rotRad)
-  stageCtx.scale(flip.horizontal ? -1 : 1, flip.vertical ? -1 : 1)
-  stageCtx.translate(-image.width / 2, -image.height / 2)
-  stageCtx.drawImage(image, 0, 0)
-
-  const cropCanvas = document.createElement('canvas')
-  cropCanvas.width = pixelCrop.width
-  cropCanvas.height = pixelCrop.height
-  const cropCtx = cropCanvas.getContext('2d')
-  if (!cropCtx) throw new Error('Could not create 2D canvas context.')
-
-  cropCtx.drawImage(
-    stage,
-    pixelCrop.x,
-    pixelCrop.y,
-    pixelCrop.width,
-    pixelCrop.height,
+  const out = computeOutputSize(region, maxEdge)
+  const canvas = document.createElement('canvas')
+  canvas.width = out.width
+  canvas.height = out.height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Could not create 2D canvas context.')
+  ctx.imageSmoothingQuality = 'high'
+  // JPEG has no alpha channel, so transparency would otherwise come out black.
+  if (format === 'image/jpeg') {
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, out.width, out.height)
+  }
+  ctx.drawImage(
+    source,
+    region.x,
+    region.y,
+    region.width,
+    region.height,
     0,
     0,
-    pixelCrop.width,
-    pixelCrop.height,
+    out.width,
+    out.height,
   )
 
-  return await canvasToBlob(cropCanvas, format, quality)
-}
-
-interface ConvertOptions {
-  format: OutputFormat
-  imageSrc: string
-  /** Optional max edge resize; preserves aspect ratio. */
-  maxEdge?: number
-  quality?: number
+  return await canvasToBlob(canvas, format, quality)
 }
 
 interface TransformOptions {
@@ -117,7 +157,7 @@ interface TransformOptions {
 
 /**
  * Re-encode an image with rotation and/or flip applied.
- * Used by the cropper for "Rotate 90°" / "Flip" buttons so the crop UI
+ * Used by the cropper's "Rotate 90°" / "Flip" buttons so the crop UI
  * always sees an upright source.
  */
 export async function transformImage({
@@ -141,29 +181,6 @@ export async function transformImage({
   ctx.translate(-image.width / 2, -image.height / 2)
   ctx.drawImage(image, 0, 0)
 
-  return await canvasToBlob(canvas, format, quality)
-}
-
-/** Re-encode an image into a different format / size. */
-export async function convertImage({
-  format,
-  imageSrc,
-  maxEdge,
-  quality = 0.92,
-}: ConvertOptions): Promise<Blob> {
-  const image = await createImage(imageSrc)
-  let { width, height } = image
-  if (maxEdge && Math.max(width, height) > maxEdge) {
-    const scale = maxEdge / Math.max(width, height)
-    width = Math.round(width * scale)
-    height = Math.round(height * scale)
-  }
-  const canvas = document.createElement('canvas')
-  canvas.width = width
-  canvas.height = height
-  const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('Could not create 2D canvas context.')
-  ctx.drawImage(image, 0, 0, width, height)
   return await canvasToBlob(canvas, format, quality)
 }
 

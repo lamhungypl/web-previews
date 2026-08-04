@@ -3,7 +3,6 @@ import {
   BookOpenText,
   Code2,
   Crop,
-  FileImage,
   FileText,
   Globe,
   type LucideIcon,
@@ -35,16 +34,10 @@ export const TOOLS: ToolEntry[] = [
     to: '/tools/md-preview',
   },
   {
-    description: 'Crop, rotate, resize and re-encode',
+    description: 'Crop, rotate, resize and re-encode to JPEG / PNG / WebP',
     icon: Crop,
-    title: 'Image Cropper',
+    title: 'Image Studio',
     to: '/tools/image-crop',
-  },
-  {
-    description: 'PNG ↔ JPEG ↔ WebP with quality control',
-    icon: FileImage,
-    title: 'Image Converter',
-    to: '/tools/image-convert',
   },
   {
     description: 'Render PDFs page by page, fully local',
