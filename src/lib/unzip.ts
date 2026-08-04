@@ -32,6 +32,27 @@ export async function unzipFile(file: File): Promise<UnpackedProject> {
   return { files, entrypoint }
 }
 
+/**
+ * Wrap an already-read set of files (e.g. a folder read off disk) as a project.
+ * `preferredEntry` wins when present — that's the file the user actually asked
+ * for, which beats guessing at `index.html`.
+ */
+export function packFiles(
+  files: Map<string, Uint8Array>,
+  preferredEntry?: string,
+): UnpackedProject {
+  if (preferredEntry && files.has(preferredEntry)) {
+    return { files, entrypoint: preferredEntry }
+  }
+  const entrypoint = findEntrypoint(files)
+  if (!entrypoint) {
+    throw new Error(
+      'No index.html found, and the folder contains more than one HTML file — could not pick an entrypoint.',
+    )
+  }
+  return { files, entrypoint }
+}
+
 /** Build an UnpackedProject from a single .html file upload. */
 export async function packSingleHtml(file: File): Promise<UnpackedProject> {
   const bytes = new Uint8Array(await file.arrayBuffer())

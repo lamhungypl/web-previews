@@ -2,7 +2,8 @@ import { useNavigate, useParams } from '@tanstack/react-router'
 import { useEffect } from 'react'
 
 import { PreviewFrame } from '@/components/PreviewFrame'
-import { unregisterProject } from '@/lib/sw-client'
+import { readDirectoryRecursive } from '@/lib/fs-access'
+import { registerProject, unregisterProject } from '@/lib/sw-client'
 import { removeProject, useProject } from '@/store/projects'
 
 export function PreviewRoute() {
@@ -27,11 +28,21 @@ export function PreviewRoute() {
     )
   }
 
+  const dir = project.dir
+
   return (
     <PreviewFrame
       projectId={projectId}
       entrypoint={project.entrypoint}
       label={project.label}
+      onRefresh={
+        dir
+          ? async () => {
+              const { files } = await readDirectoryRecursive(dir)
+              await registerProject(projectId, files)
+            }
+          : undefined
+      }
       onClear={async () => {
         await unregisterProject(projectId)
         removeProject(projectId)
